@@ -10,14 +10,32 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
+#include <netinet/in.h>     //该头文件定义了sockaddr_in结构
 #include <signal.h>
 #include <pthread.h>
+//这是sockaddr_in结构的定义
+
+/*struct sockaddr_in 
+{ 
+  short sin_family; / *必须是AF_INET * / 
+  u_short sin_port; 
+  struct in_addr sin_addr; 
+  char sin_zero [8]; / *不使用，必须为零* / 
+};
+*/
+
+struct parament
+{
+    int socketfd;
+    char *servername;
+    char *clientname;
+};
 
 void dostuff(int); /* function prototype */
 void waitchildsig(int signl);      //接受子进程发来的结束消息
 void pthread_recv(void *arg);
 void pthread_send(void *arg);
+struct parament init_pthread_parament(int fd);
 void error(const char *msg)
 {
     perror(msg);
@@ -62,7 +80,6 @@ int main(int argc, char *argv[])
         if(pid < 0)
             error("ERROR on fork");
         if(pid == 0){
-            //close(sockfd);
             dostuff(newsockfd);
             exit(0);
         }
@@ -89,50 +106,37 @@ void dostuff (int sock)
    socklen_t len=sizeof(erro);
    char buffer[256];
    pthread_t send,receiv; 
-
+   struct parament par;
+   par=init_pthread_parament(sock);
    int ret;
-   ret=pthread_create(&send,NULL,(void *)pthread_send,(void *)&sock);    //发送数据的子线程
+   ret=pthread_create(&send,NULL,(void *)pthread_send,(void *)&par);    //发送数据的子线程
    if(ret!=0)
     {
         perror("can't create send thread\n");
     }
-    ret=pthread_create(&receiv,NULL,(void *)pthread_recv,(void*)&sock); 
+    ret=pthread_create(&receiv,NULL,(void *)pthread_recv,(void*)&par); 
     if(ret!=0)
     {
         perror("can't create recev thread\n");
     }
 
     pthread_join(send,NULL);    //等待子线程的结束
-
-   /*while(1getsockopt(sock, SOL_SOCKET, SO_ERROR, &erro, &len)==0)*/    //getsockopt=0,说明套接字正常工作
-   /*{
-    bzero(buffer,256);
-    n = read(sock,buffer,255);
-    printf("Bob: %s\n",buffer+1); 
-    printf("%c",buffer[0]);
-    if (n < 0) error("ERROR reading from socket");
-      
-    fgets(buffer,255,stdin);
-    n = write(sock,buffer,255);
-    if (n < 0) error("ERROR writing to socket");
-   }*/
   
 }
 
 void pthread_send(void *arg)
 {
-    //struct parament par;
+    struct parament par;
     int n;
     char buffer[256];  //缓冲区
-    int serverfd=*((int *)arg);
+    par=*((struct parament *)arg);
     printf("chan:welcome,please write your message\n");
-    while(1/*getsockopt(clientfd, SOL_SOCKET, SO_ERROR, &erro, &len)==0*/)
+    while(1)
     {
-        //printf("chan:");
         bzero(buffer,256);
         buffer[0]='s';          //在消息头部放一个标志，s表示消息是服务器的
         fgets(buffer+1,254,stdin);        //stdin实现对终端输入的数据进行读入操作
-        n = write(serverfd,buffer,strlen(buffer));    //写消息
+        n = write(par.socketfd,buffer,strlen(buffer));    //写消息
         if (n < 0) 
             printf("ERROR writing to socket");
     }
@@ -140,20 +144,32 @@ void pthread_send(void *arg)
 
 void pthread_recv(void *arg)
 {
+    struct parament par;
     char buffer[256];
     int n=0;
-    int serverfd;
-    serverfd=*((int *)arg);     //传入的参数转回原来的类型
+    par=*((struct parament *)arg);     //传入的参数转回原来的类型
     while(1)
     {
         bzero(buffer,256);
-        n = read(serverfd,buffer,255);
+        n = read(par.socketfd,buffer,255);
         if (n < 0) 
             error("ERROR reading from socket");
         if(buffer[0]=='c')      //判断是从客户端发来的消息
         {
-            printf("jundongchen:%s\n",buffer+1);
+            printf("%s:%s\n",par.clientname,buffer+1);
         }
     }
+
+}
+
+struct parament init_pthread_parament(int fd)
+{
+    struct parament para;
+    char hostnambuff[256];      //本机主机名 
+    gethostname(hostnambuff,sizeof(hostnambuff));
+    para.servername=hostnambuff;
+    //para.clientname暂时还无法获取.....
+    para.socketfd=fd;
+    return para;
 
 }

@@ -92,10 +92,9 @@ void pthread_send(void *arg)
     int n;
     char buffer[256];  //缓冲区
     par=*((struct parament *)arg);     //传入的参数转回原来的类型
-    printf("%s:welcome,please write your message\n",par.servername);
+    printf("%s:welcome,please write your message\n",par.clientname);
     while(1)
     {
-        //printf("chan:");
         bzero(buffer,256);
         buffer[0]='c';          //在消息头部放一个标志，s表示消息是服务器的
         fgets(buffer+1,254,stdin);        //stdin实现对终端输入的数据进行读入操作
