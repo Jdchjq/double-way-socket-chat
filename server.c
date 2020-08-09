@@ -1,7 +1,7 @@
-/* A simple server in the internet domain using TCP
-   The port number is passed as an argument 
-   This version runs forever, forking off a separate 
-   process for each connection
+/* 这是一个简单的基于TCP的socket传输，
+实现客户端和服务器的全双工通信
+端口号由执行程序时，通过参数传进程序
+当该程序处于监听状态时，客户端就可以进行连接
 */
 #include <stdio.h>
 #include <unistd.h>
@@ -17,26 +17,79 @@
 
 /*struct sockaddr_in 
 { 
-  short sin_family; / *必须是AF_INET * / 
+  short sin_family;  //必须是AF_INET，表示IPV4
   u_short sin_port; 
   struct in_addr sin_addr; 
-  char sin_zero [8]; / *不使用，必须为零* / 
+  char sin_zero [8];   //不使用，必须为零
 };
 */
 
+//线程参数
 struct parament
 {
-    int socketfd;
-    char *servername;
-    char *clientname;
+    int socketfd;   //socket文件描述符
+    char *servername;   //服务器主机名
+    char *clientname;   //客户端主机名
 };
 
-void dostuff(int); /* function prototype */
+void error(const char *msg);
+void dostuff(int); /* 建立连接后，服务器对该连接做的事*/
 void waitchildsig(int signl);      //接受子进程发来的结束消息
-void pthread_recv(void *arg);
-void pthread_send(void *arg);
-struct parament init_pthread_parament(int fd);
-void error(const char *msg)
+void pthread_recv(void *arg);       //接受消息线程
+void pthread_send(void *arg);       //发送消息线程
+struct parament init_pthread_parament(int fd);      //初始化传入线程的参数
+
+int main(int argc, char *argv[])
+{
+     int sockfd, newsockfd, portno, pid;    //pid是多进程，用于接受多个连接
+     socklen_t clilen;        //accept()的第三个参数类型，存放sockaddr_in结构的大小
+     struct sockaddr_in serv_addr, cli_addr;    //存放协商好的传输协议信息
+
+     if (argc < 2) {
+         fprintf(stderr,"ERROR, no port provided\n");
+         exit(1);
+     }
+     //1、创建socekt
+     sockfd = socket(AF_INET, SOCK_STREAM, 0);
+     if (sockfd < 0) 
+        error("ERROR opening socket");
+    //2、给serv_addr赋值，定义了IP地址和端口
+     bzero((char *) &serv_addr, sizeof(serv_addr));
+     portno = atoi(argv[1]);
+     serv_addr.sin_family = AF_INET;
+     serv_addr.sin_addr.s_addr = INADDR_ANY;    //获取本机IP
+     serv_addr.sin_port = htons(portno);
+     //3、bind()将套接字绑定到 ip地址的端口上
+     if (bind(sockfd, (struct sockaddr *) &serv_addr,
+        sizeof(serv_addr)) < 0) 
+        error("ERROR on binding");
+    //4、监听该端口，如果有客户端想建立连接，则继续后面的代码
+     listen(sockfd,5);
+     clilen = sizeof(cli_addr);
+     while (1){
+         //5、接受一个连接请求，返回对应该连接的新的套接字
+        newsockfd = accept(sockfd, 
+            (struct sockaddr *) &cli_addr, &clilen);
+        if(newsockfd < 0) 
+            error("ERROR on accept");
+        pid = fork();      //创建子进程
+        if(pid < 0)
+            error("ERROR on fork");
+        if(pid == 0){
+            //6、子进程中dostuff()管理这个连接，父进程继续接受其他连接
+            dostuff(newsockfd);
+            exit(0);
+        }
+        else{
+            signal(SIGCHLD,waitchildsig);   //通过特定函数处理子进程的结束信号
+            close(newsockfd);
+        } 
+    }
+     close(sockfd);     //7、关闭套接字
+     return 0;
+}
+
+void error(const char *msg)     //出错处理函数
 {
     perror(msg);
     exit(1);
@@ -48,58 +101,7 @@ void waitchildsig(int signl)
         waitpid(-1,NULL,WNOHANG);   //等待子进程的信号，WNOHANG表示非阻塞等待
     }
 }
-int main(int argc, char *argv[])
-{
-     int sockfd, newsockfd, portno, pid;
-     socklen_t clilen;
-     struct sockaddr_in serv_addr, cli_addr;
-
-     if (argc < 2) {
-         fprintf(stderr,"ERROR, no port provided\n");
-         exit(1);
-     }
-     sockfd = socket(AF_INET, SOCK_STREAM, 0);
-     if (sockfd < 0) 
-        error("ERROR opening socket");
-     bzero((char *) &serv_addr, sizeof(serv_addr));
-     portno = atoi(argv[1]);
-     serv_addr.sin_family = AF_INET;
-     serv_addr.sin_addr.s_addr = INADDR_ANY;
-     serv_addr.sin_port = htons(portno);
-     if (bind(sockfd, (struct sockaddr *) &serv_addr,
-        sizeof(serv_addr)) < 0) 
-        error("ERROR on binding");
-     listen(sockfd,5);
-     clilen = sizeof(cli_addr);
-     while (1){
-        newsockfd = accept(sockfd, 
-            (struct sockaddr *) &cli_addr, &clilen);
-        if(newsockfd < 0) 
-            error("ERROR on accept");
-        pid = fork();      //创建子进程
-        if(pid < 0)
-            error("ERROR on fork");
-        if(pid == 0){
-            dostuff(newsockfd);
-            exit(0);
-        }
-        else{
-            signal(SIGCHLD,waitchildsig);   //通过特定函数处理该信号
-            close(newsockfd);
-        } 
-
-    } /* end of while */
-
-     close(sockfd);
-     return 0; /* we never get here */
-}
-
-/******** DOSTUFF() *********************
- There is a separate instance of this function 
- for each connection.  It handles all communication
- once a connnection has been established.
- *****************************************/
-void dostuff (int sock)
+void dostuff (int sock) //创建两个线程用于接受和发送消息
 {
    int n;
    int erro=0;
